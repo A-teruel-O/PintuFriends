@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="es"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Dibuja y adivina</title>
+<style>
+:root{--bg:#eef2ff;--ink:#1b1b2f;--card:#fff;--acc:#ff4d6d;--mut:#6b6f8a}
+@media(prefers-color-scheme:dark){:root{--bg:#14152a;--ink:#f1f2ff;--card:#1f2040;--mut:#9a9dc0}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:500 16px/1.4 system-ui,sans-serif;padding:max(14px,env(safe-area-inset-top)) 14px 24px}
+main{max-width:460px;margin:0 auto}h1{font-size:1.5rem;margin:.2em 0}h2{font-size:1.1rem;margin:18px 0 8px}
+.card{background:var(--card);border:2px solid var(--ink);border-radius:16px;padding:12px;margin-bottom:12px}
+button,input{font:inherit;color:inherit}button{border:2px solid var(--ink);background:var(--card);border-radius:12px;padding:9px 14px;font-weight:700;cursor:pointer}
+button.p{background:var(--acc);color:#fff}input{width:100%;padding:10px;border:2px solid var(--ink);border-radius:12px;background:var(--card);margin:4px 0 8px}
+.im{width:100%;background:#fff;border:2px solid var(--ink);border-radius:12px;display:block}.mut{color:var(--mut)}.hint{font:700 1.3rem monospace;letter-spacing:2px}
+canvas{width:100%;aspect-ratio:1;background:#fff;border:2px solid var(--ink);border-radius:12px;touch-action:none;display:block}
+.tools{display:flex;gap:5px;flex-wrap:wrap;margin:8px 0}.sw{width:30px;height:30px;padding:0;border-radius:50%}.on{outline:3px solid var(--acc)}
+table{width:100%;border-collapse:collapse}td,th{padding:4px 2px;text-align:right}td:nth-child(-n+2),th:nth-child(-n+2){text-align:left}th{color:var(--mut);font-weight:500}
+.opts{display:grid;gap:8px}.err{color:var(--acc);font-weight:700}
+</style></head><body><main id="app"></main>
+<script>
+/* ====== CONFIGURACIÓN: los datos de TU NUEVO proyecto de Supabase ====== */
+const SUPABASE_URL = "https://whtovjcpeugsyeimgwyv.supabase.co";
+const SUPABASE_KEY = "sb_publishable_NotcE_PsR-KsOqIss5CzOg_J76zMEME";
+/* ====================================================================== */
+const $=s=>document.querySelector(s),app=$("#app"),ls=(k,v)=>v===undefined?localStorage.getItem(k):localStorage.setItem(k,v);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function call(action,extra={}){
+  const r=await fetch(SUPABASE_URL+"/functions/v1/game",{method:"POST",headers:{apikey:SUPABASE_KEY,"Content-Type":"application/json"},
+    body:JSON.stringify({action,room:ls("room"),name:ls("name"),pin:ls("pin"),...extra})});
+  const j=await r.json().catch(()=>({error:"La función no responde"})); if(j.error) throw new Error(j.error); return j;}
+let S=null,poll=null,chosen=null;
+function join(msg=""){
+  clearInterval(poll);
+  app.innerHTML=`<h1>Dibuja y adivina</h1><div class="card"><p class="err">${esc(msg)}</p>
+  <label>Tu nombre<input id="n" maxlength="20" value="${esc(ls("name")||"")}"></label>
+  <label>Código de sala<input id="r" maxlength="30" value="${esc(ls("room")||"")}"></label>
+  <label>PIN de 4 cifras (tuyo, para que nadie juegue por ti)<input id="p" type="password" inputmode="numeric" maxlength="4" value="${esc(ls("pin")||"")}"></label>
+  <button class="p" id="go">Entrar</button></div>`;
+  $("#go").onclick=async()=>{ls("name",$("#n").value.trim());ls("room",$("#r").value.trim().toLowerCase());ls("pin",$("#p").value);
+    try{await call("join");load()}catch(e){join(e.message)}};}
+async function load(){
+  try{S=await call("state")}catch(e){return join(e.message)}
+  render(); clearInterval(poll); poll=setInterval(()=>{if(chosen===null&&!document.activeElement?.matches("input"))load()},25000);}
+const att=a=>a.map(x=>`<div>${esc(x.text)} ${x.points?"✅ +"+x.points:"❌"}</div>`).join("");
+function render(){
+  const s=S,left=s.seasonLen-s.seasonDay;
+  app.innerHTML=`<h1>Día ${s.n} · Temporada ${s.season}</h1><p class="mut">Día ${s.seasonDay} de ${s.seasonLen} de la temporada. ${esc(ls("name"))} · sala ${esc(ls("room"))}</p>
+  ${s.guess.length?"<h2>Adivina los dibujos de ayer</h2>":""}
+  ${s.guess.map((g,i)=>`<div class="card"><b>Dibujo de ${esc(g.author)}</b><img class="im" src="${g.img}" alt="">
+    ${att(g.attempts)}
+    ${g.done?(g.points?"<p>¡Acertado!</p>":`<p>Era: <b>${esc(g.word)}</b> (0 puntos)</p>`)
+    :`${g.hint?`<p class="hint">${esc(g.hint)}</p>`:""}<input id="g${i}" placeholder="¿Qué es?" autocomplete="off"><button class="p" data-g="${i}">Probar (${g.attempts.length+1}/3 · vale ${3-g.attempts.length})</button>`}</div>`).join("")}
+  <h2>Tu dibujo de hoy</h2><div id="mine">${mine()}</div>
+  ${s.yesterday?`<h2>Tu dibujo de ayer: ${esc(s.yesterday.word)}</h2><div class="card">${s.yesterday.guessers.map(g=>`<p><b>${esc(g.name)}</b>${g.attempts.length?att(g.attempts):'<div class="mut">aún no ha jugado</div>'}</p>`).join("")}</div>`:""}
+  <h2>Clasificación de la temporada</h2><div class="card"><table><tr><th></th><th>Jugador</th><th>Pts</th><th>Claros</th><th>Intentos</th></tr>
+  ${s.table.map((t,i)=>`<tr><td>${i+1}</td><td>${esc(t.name)}</td><td><b>${t.pts}</b></td><td>${t.perfect}</td><td>${t.tries}</td></tr>`).join("")}</table>
+  <p class="mut" style="font-size:.85rem">Empates: 1º puntos, 2º «Claros» (dibujos que alguien acertó a la primera), 3º menos intentos gastados. Quedan ${left} días.</p>
+  ${s.champs.length?`<p>Campeones: ${s.champs.map(c=>`T${c.season} ${esc(c.name)} (${c.pts})`).join(" · ")}</p>`:""}</div>
+  <p><button id="re">Actualizar</button> <button id="out">Salir</button></p>`;
+  $("#re").onclick=load;$("#out").onclick=()=>{localStorage.removeItem("pin");join()};}
+function mine(){
+  const s=S;
+  if(s.drawn) return `<div class="card">Hoy has dibujado <b>${esc(s.drawn)}</b>. Mañana los demás intentarán adivinarlo.</div>`;
+  if(!s.options) return `<div class="card mut">Primero adivina los dibujos de arriba.</div>`;
+  if(chosen===null) return `<div class="card"><p>Elige una palabra para dibujar:</p><div class="opts">${s.options.map((o,i)=>`<button data-o="${i}">${esc(o)}</button>`).join("")}</div></div>`;
+  return `<div class="card"><p>Dibuja: <b>${esc(s.options[chosen])}</b></p><canvas id="c" width="500" height="500"></canvas>
+  <div class="tools" id="tl">${["#1b1b2f","#e63946","#ff9f1c","#ffd23f","#2a9d8f","#3a86ff","#8338ec","#8d5524"].map(c=>`<button class="sw" data-c="${c}" style="background:${c}"></button>`).join("")}</div>
+  <div class="tools"><button data-s="4">Fino</button><button data-s="10">Medio</button><button data-s="24">Grueso</button><button id="er">Goma</button><button id="un">↩</button><button id="cl">🗑️</button></div>
+  <button class="p" id="send" style="width:100%">Enviar dibujo</button><p class="mut">Solo se envía una vez.</p></div>`;}
+app.addEventListener("click",async e=>{
+  const b=e.target.closest("button"); if(!b) return;
+  try{
+    if(b.dataset.g!==undefined){const i=+b.dataset.g,t=$("#g"+i).value.trim(); if(!t) return; await call("guess",{author:S.guess[i].author,text:t}); await load();}
+    else if(b.dataset.o!==undefined){chosen=+b.dataset.o;$("#mine").innerHTML=mine();canvas();}
+  }catch(err){alert(err.message)}});
+function canvas(){
+  const cv=$("#c"),x=cv.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,500,500);x.lineCap=x.lineJoin="round";
+  let col="#1b1b2f",w=10,er=false,on=false,hist=[];
+  const pos=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*500/r.width,(e.clientY-r.top)*500/r.height]};
+  cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);hist.push(x.getImageData(0,0,500,500));if(hist.length>10)hist.shift();on=true;
+    x.strokeStyle=er?"#fff":col;x.lineWidth=er?w*1.6:w;const[a,b]=pos(e);x.beginPath();x.moveTo(a,b);x.lineTo(a+.1,b);x.stroke()};
+  cv.onpointermove=e=>{if(!on)return;const[a,b]=pos(e);x.lineTo(a,b);x.stroke()};
+  cv.onpointerup=cv.onpointercancel=()=>{on=false};
+  $("#mine").onclick=async e=>{const b=e.target.closest("button");if(!b)return;
+    if(b.dataset.c){col=b.dataset.c;er=false}
+    if(b.dataset.s)w=+b.dataset.s;
+    if(b.id==="er")er=!er;
+    if(b.id==="un"&&hist.length)x.putImageData(hist.pop(),0,0);
+    if(b.id==="cl"){hist.push(x.getImageData(0,0,500,500));x.fillStyle="#fff";x.fillRect(0,0,500,500)}
+    if(b.id==="send"){b.disabled=true;try{await call("draw",{index:chosen,img:cv.toDataURL("image/jpeg",0.7)});chosen=null;await load()}catch(err){alert(err.message);b.disabled=false}}};}
+SUPABASE_URL.startsWith("PEGA")?app.innerHTML='<div class="card"><h1>Falta configurar</h1><p>Pega la URL y la clave de Supabase arriba del todo en el archivo.</p></div>':(ls("name")&&ls("room")&&ls("pin")?load():join());
+</script></body></html>
